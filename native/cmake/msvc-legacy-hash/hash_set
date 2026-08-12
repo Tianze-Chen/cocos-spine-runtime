@@ -1,0 +1,5 @@
+#pragma once
+
+// Visual Studio 18 removed this legacy STL header. Protobuf 2.5 only needs
+// the include to succeed before selecting its MISSING_HASH fallback.
+#include <set>

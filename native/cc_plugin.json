@@ -1,0 +1,13 @@
+{
+    "name": "spine-runtime",
+    "version": "1.0.0",
+    "engine-version": ">=3.8.0",
+    "author": "spine-runtime",
+    "description": "sp.spine native runtime: SpineRuntime JSB binding + spine-cpp 4.3.",
+    "platforms": ["android", "ios", "windows", "mac"],
+    "modules": [
+        {
+            "target": "spine_runtime"
+        }
+    ]
+}

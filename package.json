@@ -1,0 +1,60 @@
+{
+    "name": "spine-runtime",
+    "package_version": 2,
+    "version": "1.0.0",
+    "description": "sp.spine — Spine 4.3 runtime for Cocos Creator. Powered by spine-cpp 4.3 through the SpineRuntime binding; renders via the engine's cc.UIMesh consumer.",
+    "author": "spine-runtime",
+    "main": "./main.js",
+    "editor": ">=3.8.0",
+    "contributions": {
+        "scene": {
+            "script": "./editor/scene/drop-handle.js"
+        },
+        "inspector": {
+            "section": {
+                "node": {
+                    "sp.spine": "./editor/inspector/spine.js"
+                }
+            },
+            "drop": {
+                "node": [
+                    {
+                        "type": "sp.spineData",
+                        "message": "inspector-drop"
+                    }
+                ]
+            }
+        },
+        "messages": {
+            "inspector-drop": {
+                "methods": [
+                    "default.inspectorDrop"
+                ]
+            }
+        },
+        "asset-db": {
+            "script": "./editor/importer/asset-db-script",
+            "mount": {
+                "path": "./runtime",
+                "readonly": true
+            },
+            "asset-handler": [
+                {
+                    "name": "spine-skeleton",
+                    "extnames": [
+                        ".json"
+                    ],
+                    "handler": "registerSpineSkeletonHandler"
+                }
+            ]
+        },
+        "native": {
+            "plugins": {
+                "spine-runtime": {
+                    "cc_plugin.json": "./native/cc_plugin.json"
+                }
+            }
+        },
+        "builder": "./editor/build/builder.js"
+    }
+}

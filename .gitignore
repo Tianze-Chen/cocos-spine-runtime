@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Editor / tool session artifacts
+.claude/
+
+# Native wasm build output (regenerate via emcmake + ninja)
+native/wasm/build*
+native/wasm/CMakeFiles/
+native/wasm/cmake_install.cmake
+native/wasm/CMakeCache.txt
+native/wasm/build.ninja
+native/wasm/Makefile
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.log
