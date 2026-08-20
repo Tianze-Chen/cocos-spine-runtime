@@ -28,7 +28,7 @@
         "messages": {
             "inspector-drop": {
                 "methods": [
-                    "default.inspectorDrop"
+                    "inspectorDrop"
                 ]
             }
         },

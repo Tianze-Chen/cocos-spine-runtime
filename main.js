@@ -9,8 +9,9 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
-const LOG = process.env.SPINE_MAIN_LOG || 'D:/projects/spine/main-drop.log';
+const LOG = process.env.SPINE_MAIN_LOG || path.join(os.tmpdir(), 'spine-runtime-main-drop.log');
 const WASM_SOURCE = path.join(__dirname, 'native', 'wasm', 'prebuilt', 'spine-runtime.wasm');
 
 function log (msg) {
@@ -46,19 +47,41 @@ exports.load = async function load () {
 };
 
 exports.methods = {
-    async inspectorDrop (args) {
-        log(`MAIN inspectorDrop args: ${JSON.stringify(args)}`);
-        try {
-            const res = await Editor.Message.request('scene', 'execute-scene-script', {
-                name: 'spine-runtime',
-                method: 'inspectorDrop',
-                args: [args],
-            });
-            log(`MAIN execute-scene-script returned: ${JSON.stringify(res)}`);
-            return res;
-        } catch (e) {
-            log(`MAIN execute-scene-script FAILED: ${e.message}`);
-            throw e;
+    /**
+     * `contributions.inspector.drop.node` handler.
+     *
+     * The Inspector's node panel (engine `editor/inspector/contributions/node.js`)
+     * dispatches the drop as
+     *
+     *     Editor.Message.request(pkg, message, dropItem, dumps, uuidList)
+     *
+     * wrapped in scene `begin-recording` / `end-recording`, so everything we do
+     * here lands in a single undo step. `dropItem` is one entry of the drag's
+     * `additional` list: `{ type: 'sp.spineData', value: <asset uuid> }`.
+     *
+     * Component creation must happen in the scene process, so forward one call
+     * per selected node to the scene script.
+     */
+    async inspectorDrop (dropItem, dumps, uuidList) {
+        const assetUuid = String((dropItem && dropItem.value) || '').replace(/@[\w]+$/, '');
+        const nodeUuids = (Array.isArray(uuidList) && uuidList.length > 0)
+            ? uuidList.filter(Boolean)
+            : (Array.isArray(dumps) ? dumps.map((dump) => dump && dump.uuid && dump.uuid.value).filter(Boolean) : []);
+        log(`MAIN inspectorDrop asset=${assetUuid} nodes=${JSON.stringify(nodeUuids)}`);
+        if (!assetUuid || nodeUuids.length === 0) return;
+
+        for (const nodeUuid of nodeUuids) {
+            try {
+                const res = await Editor.Message.request('scene', 'execute-scene-script', {
+                    name: 'spine-runtime',
+                    method: 'inspectorDrop',
+                    args: [nodeUuid, assetUuid],
+                });
+                log(`MAIN execute-scene-script (${nodeUuid}) returned: ${JSON.stringify(res)}`);
+            } catch (e) {
+                log(`MAIN execute-scene-script (${nodeUuid}) FAILED: ${e && e.message}`);
+                console.warn(`[spine-runtime] could not add sp.spine to ${nodeUuid}: ${e && e.message}`);
+            }
         }
     },
 };

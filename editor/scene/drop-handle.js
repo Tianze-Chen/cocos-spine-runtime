@@ -15,13 +15,18 @@
  *   3. onDrop builds the node + sp.spine component + bound skeletonData directly
  *      in the scene process.
  *
+ * It also exposes `methods.inspectorDrop`, the scene-side half of the
+ * `contributions.inspector.drop` path: dropping a sp.spineData asset onto a
+ * node's Inspector adds sp.spine to that node instead of creating a new one.
+ *
  * Runs via contributions.scene.script (load()/unload()).
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
-const LOG = process.env.SPINE_DROP_LOG || 'D:/projects/spine/drop-handle.log';
+const LOG = process.env.SPINE_DROP_LOG || path.join(os.tmpdir(), 'spine-runtime-drop-handle.log');
 
 function log (msg) {
     try {
@@ -75,25 +80,44 @@ function makePlainHandler () {
     };
 }
 
-// Add the sp.spine component to an EXISTING node (drop-onto-node).
+// Add the sp.spine component to an EXISTING node (drop-onto-node), or rebind
+// the asset when the node already carries one.
+//
+// Uses `cce.Node.createComponent` (the editor-facing add-component API) rather
+// than touching `node.addComponent` directly: it resolves the class by name,
+// fires the node-manager events the Inspector and the undo history listen to,
+// and runs the editor's component-collision checks. This mirrors the engine's
+// own "drag asset onto node" handlers
+// (engine-extensions/engine-extends/source/scene/drag-asset-onto-node-handlers).
 async function addComponentToNode (node, uuid) {
     try {
         const cc = require('cc');
-        const sfm = cce.SceneFacadeManager;
         const asset = await new Promise((res) => cc.assetManager.loadAny(uuid, (err, a) => res(err ? null : a)));
-        if (!asset) { log('addComponentToNode: asset load failed'); return; }
-        await sfm.createComponent({ uuid: node.uuid, component: 'sp.spine' });
+        if (!asset) { log('addComponentToNode: asset load failed'); return false; }
+
         const compClass = cc.js.getClassByName ? cc.js.getClassByName('sp.spine') : null;
-        const comp = compClass ? node.getComponent(compClass) : null;
-        if (comp) {
-            comp.spineData = asset;
-            log(`addComponentToNode: added sp.spine to "${node.name}"`);
+        if (!compClass) { log('addComponentToNode: sp.spine class is not registered'); return false; }
+
+        let comp = node.getComponent(compClass);
+        if (!comp) {
+            const created = cce.Node.createComponent(node.uuid, 'sp.spine');
+            comp = node.getComponent(compClass);
+            log(`addComponentToNode: createComponent returned ${created}, comp=${!!comp}`);
         } else {
-            log('addComponentToNode: component not found after createComponent');
+            log('addComponentToNode: node already has sp.spine — rebinding spineData');
         }
+        if (!comp) { log('addComponentToNode: component not found after createComponent'); return false; }
+
+        comp.spineData = asset;
+        // Tell the editor the node changed so the Inspector refreshes and the
+        // scene is flagged dirty / recorded by the surrounding undo step.
+        cce.Node.emit('change', node);
         if (cce.Engine && cce.Engine.repaintInEditMode) cce.Engine.repaintInEditMode();
+        log(`addComponentToNode: bound "${asset.name}" on "${node.name}"`);
+        return true;
     } catch (e) {
         log(`addComponentToNode ERROR: ${(e && e.stack) || e}`);
+        return false;
     }
 }
 
@@ -131,7 +155,7 @@ function makeHandler () {
                             const specific = nodes.find((n) => n && n.uuid && !n.isScene && n.name !== 'Canvas' && n.name !== 'Scene');
                             const target = specific || nodes[nodes.length - 1];
                             if (target) {
-                                await addComponentToNode(target, item.value);
+                                await addComponentToNode(target, String(item.value).replace(/@[\w]+$/, ''));
                                 return;
                             }
                         }
@@ -300,21 +324,25 @@ exports.unload = function unload () {
 };
 
 exports.methods = {
-    // Handle the editor's "asset dropped onto a node" message
-    // (contributions.inspector.drop.node -> message). Payload shape is logged.
-    async inspectorDrop (args) {
-        log(`inspectorDrop args: ${JSON.stringify(args)}`);
-        const uuid = (args && (args.assetUuid || args.uuid)) || '';
-        const node = args && (args.node || args.nodeUuid);
-        log(`inspectorDrop: node=${JSON.stringify(node)} asset=${uuid}`);
-        if (!uuid || !node) return;
-        // node may be a uuid string or a node object
-        const nodeUuid = typeof node === 'string' ? node : node.uuid;
-        const nn = cce.Node.query ? cce.Node.query(nodeUuid) : null;
-        if (nn) {
-            await addComponentToNode(nn, uuid);
-        } else {
+    /**
+     * Called (through main.js) when a sp.spineData asset is dropped onto the
+     * Inspector of a node: add sp.spine to that node and bind the asset.
+     *
+     * main.js already unpacked the editor's `(dropItem, dumps, uuidList)`
+     * payload, so this receives one node uuid and one asset uuid.
+     */
+    async inspectorDrop (nodeUuid, assetUuid) {
+        log(`inspectorDrop: node=${nodeUuid} asset=${assetUuid}`);
+        if (!nodeUuid || !assetUuid) return false;
+        const node = cce.Node.query ? cce.Node.query(nodeUuid) : null;
+        if (!node) {
             log(`inspectorDrop: node not found via cce.Node.query (${nodeUuid})`);
+            return false;
         }
+        if (node.isScene) {
+            log('inspectorDrop: target is the scene root — ignored');
+            return false;
+        }
+        return addComponentToNode(node, String(assetUuid).replace(/@[\w]+$/, ''));
     },
 };

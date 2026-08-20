@@ -59,7 +59,7 @@ spine-runtime/
             "section": { "node": { "sp.spine": "./editor/inspector/spine.js" } },
             "drop": { "node": [{ "type": "sp.spineData", "message": "inspector-drop" }] }
         },
-        "messages": { "inspector-drop": { "methods": ["default.inspectorDrop"] } },
+        "messages": { "inspector-drop": { "methods": ["inspectorDrop"] } },
         "asset-db": {
             "script": "./editor/importer/asset-db-script",               // asset-db worker 脚本
             "mount":  { "path": "./runtime", "readonly": true },          // 把 runtime/ 只读挂载为项目脚本
@@ -105,18 +105,50 @@ exports.load = async function load() {
 };
 
 exports.methods = {
-    async inspectorDrop (args) {
-        const res = await Editor.Message.request('scene', 'execute-scene-script', {
-            name: 'spine-runtime',
-            method: 'inspectorDrop',
-            args: [args],
-        });
-        return res;
+    // Inspector 的节点面板发送的是三个参数:(dropItem, dumps, uuidList)
+    async inspectorDrop (dropItem, dumps, uuidList) {
+        const assetUuid = dropItem.value;
+        const nodeUuids = uuidList.length ? uuidList : dumps.map((dump) => dump.uuid.value);
+        for (const nodeUuid of nodeUuids) {
+            await Editor.Message.request('scene', 'execute-scene-script', {
+                name: 'spine-runtime',
+                method: 'inspectorDrop',
+                args: [nodeUuid, assetUuid],
+            });
+        }
     },
 };
 ```
 
 为什么需要它?`contributions.inspector.drop`(把资源拖到 Inspector 的节点上)会把消息发到**主进程**,但「创建组件/节点」必须在**场景进程**做。所以主进程收到 `inspectorDrop`,就通过 `Editor.Message.request('scene', 'execute-scene-script', ...)` 转发给场景进程里 `drop-handle.js` 的 `methods.inspectorDrop`。
+
+关于这条链路,有三个**必须和编辑器对齐**的细节(都可以在编辑器源码里核对):
+
+1. **`messages.methods` 里不要写 `default.` 前缀。** `"default.xxx"` 表示「名为 `default` 的**面板**上的方法」(例如 scene 包的 `default.create-component`)。本插件没有面板,方法在主进程 `main.js` 的 `exports.methods` 上,所以直接写 `"inspectorDrop"`——和内置 animator 的 `"dropClipToNode"` 一样。
+2. **参数形态是 `(dropItem, dumps, uuidList)`。** 派发点在引擎仓库 `editor/inspector/contributions/node.js`:
+   ```js
+   const config = panel.dropConfig[info.type];
+   if (config) {
+       await Editor.Message.request(config.package, config.message, info, panel.dumps, panel.uuidList);
+   }
+   ```
+   `dropItem`(即 `info`)是拖拽 `additional` 里的一项:`{ type: 'sp.spineData', value: '<资源 uuid>' }`。`type` 必须和 `contributions.inspector.drop.node[].type` 精确相等——也就是导入器 `assetType` 声明的类型名。
+3. **整段调用被 `begin-recording` / `end-recording` 包住**,所以「加组件 + 绑资源」天然是一步撤销;场景侧不需要自己做快照,但要 `cce.Node.emit('change', node)` 让 Inspector 刷新、场景标记为已修改。
+
+场景侧(`drop-handle.js`)用编辑器面向外部的加组件 API,而不是直接 `node.addComponent`:
+
+```js
+// 已有 sp.spine 就只重新绑定资源,否则先建组件
+let comp = node.getComponent(cc.js.getClassByName('sp.spine'));
+if (!comp) {
+    cce.Node.createComponent(node.uuid, 'sp.spine');
+    comp = node.getComponent(cc.js.getClassByName('sp.spine'));
+}
+comp.spineData = asset;
+cce.Node.emit('change', node);
+```
+
+> 这正是引擎自己的做法,可参考 `engine-extensions/engine-extends/source/scene/drag-asset-onto-node-handlers/animation-graph.ts`(把 AnimationGraph 拖到节点上自动加 AnimationController)。
 
 > 心智模型:主进程 = 消息总机;场景进程 = 真正改场景的地方;`execute-scene-script` 就是它们之间的总线。
 
