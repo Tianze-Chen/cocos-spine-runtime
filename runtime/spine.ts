@@ -23,7 +23,7 @@ import {
     setPropertyEnumType,
 } from 'cc';
 import { _decorator } from 'cc';
-const { ccclass, executeInEditMode, editable, help, menu, property } = _decorator;
+const { ccclass, executeInEditMode, editable, help, menu, override, property } = _decorator;
 import type { UIMeshSegment } from 'cc';
 import { spine, loadSpineRuntime } from './bindings';
 import { RuntimeData, RuntimeTextureMap } from './runtime-data';
@@ -856,6 +856,7 @@ export class Spine extends UIMesh {
      * 编译），因此切换此项只改变合批合并，不会翻转渲染实体的 useLocal 标志——
      * 节点/世界矩阵不可被重复应用。
      */
+    @override
     @editable
     get enableBatch (): boolean { return (this as any)._enableBatch; }
     set enableBatch (value: boolean) {

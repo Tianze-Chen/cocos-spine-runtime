@@ -20,6 +20,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const engineModules = require('../engine-modules');
 
 const WASM_SOURCE = path.join(__dirname, '..', '..', 'native', 'wasm', 'prebuilt', 'spine-runtime.wasm');
 const WASM_NAME = 'spine-runtime.wasm';
@@ -55,6 +56,50 @@ function findCocosJsDir(result) {
     }
     return null;
 }
+
+/**
+ * Fail the build when the project crops an engine feature the runtime needs.
+ *
+ * This is the only place the mistake can still be caught: the editor's engine is
+ * a full build, so an unticked `webassembly` is invisible while authoring and
+ * would only surface as a runtime error inside the packaged game.
+ *
+ * `2d` is required on every platform (sp.spine extends cc.UIMesh); `cc.wasm` is
+ * only used on the web/mini-game path, native goes through the JSB binding.
+ */
+exports.onBeforeBuild = async function (options) {
+    const platform = options && options.platform;
+    const native = !shouldCopy(platform);
+
+    const configs = await engineModules.readConfigs();
+    if (!configs) {
+        log('engine module check skipped: project module configs are unavailable');
+        return;
+    }
+    // The build options do not carry the module list, so check the config the
+    // project marks as global — the same one the panel edits by default.
+    const key = await engineModules.globalConfigKey();
+    const config = configs[key] || configs.defaultConfig;
+    if (!config) {
+        log(`engine module check skipped: no module config named "${key}"`);
+        return;
+    }
+
+    let missing = engineModules.missingModules(config);
+    if (native) {
+        missing = missing.filter((name) => name !== 'webassembly');
+    }
+    if (missing.length === 0) {
+        log(`engine modules ok (config "${key}")`);
+        return;
+    }
+
+    throw new Error(`[spine-runtime] 项目缺少必需的引擎模块 / missing required engine modules: `
+        + `${missing.join(', ')} (功能裁剪配置 / module config "${key}").\n`
+        + `请在 项目设置 → 功能裁剪 中勾选它们后重新构建 / enable them in `
+        + `Project Settings → Feature Cropping and build again.\n`
+        + `配置文件 / config file: ${engineModules.settingsFile()}`);
+};
 
 exports.onAfterBuild = async function (options, result) {
     try {

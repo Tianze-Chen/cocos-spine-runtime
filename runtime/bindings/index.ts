@@ -289,7 +289,9 @@ async function loadWasmBinding (): Promise<SpineRuntimeBinding> {
     const factory = await loadWasmFactory();
     const pal = ccWasm();
     if (!pal) {
-        throw new Error('[SpineRuntime] cc.wasm is unavailable; the external WASM loader requires the custom engine webassembly export');
+        throw new Error('[SpineRuntime] cc.wasm is unavailable. Enable the WebAssembly module in '
+            + 'Project Settings -> Feature Cropping (项目设置 -> 功能裁剪), and make sure the project '
+            + 'uses the custom engine that exports cc.wasm');
     }
     return await new Promise<SpineRuntimeBinding>((resolve, reject) => {
         factory({
