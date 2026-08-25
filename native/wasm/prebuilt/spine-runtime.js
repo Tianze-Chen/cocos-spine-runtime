@@ -1092,6 +1092,21 @@ var ret = fromRetWire(rv);
 return ret;
 }
 
+},'ftfntnn': function anonymous(humanName,throwBindingError,invoker,fn,runDestructors,fromRetWire,toClassParamWire,toArg0Wire,toArg1Wire,toArg2Wire,toArg3Wire,arg1Wired_dtor,checkArgCount,minArgs,maxArgs
+) {
+if (arguments.length !== 15){ throw new Error(humanName + "Expected 15 closure arguments " + arguments.length + " given."); }
+return function (arg0,arg1,arg2,arg3) {
+checkArgCount(arguments.length, minArgs, maxArgs, humanName, throwBindingError);
+var arg0Wired = toArg0Wire(null, arg0);
+var arg1Wired = toArg1Wire(null, arg1);
+var arg2Wired = toArg2Wire(null, arg2);
+var arg3Wired = toArg3Wire(null, arg3);
+var rv = invoker(fn,arg0Wired,arg1Wired,arg2Wired,arg3Wired);
+arg1Wired_dtor(arg1Wired);
+var ret = fromRetWire(rv);
+return ret;
+}
+
 },'ftf': function anonymous(humanName,throwBindingError,invoker,fn,runDestructors,fromRetWire,toClassParamWire,checkArgCount,minArgs,maxArgs
 ) {
 if (arguments.length !== 10){ throw new Error(humanName + "Expected 10 closure arguments " + arguments.length + " given."); }
@@ -1343,21 +1358,6 @@ var arg6Wired = toArg6Wire(null, arg6);
 var arg7Wired = toArg7Wire(null, arg7);
 var arg8Wired = toArg8Wire(null, arg8);
 var rv = invoker(fn,arg0Wired,arg1Wired,arg2Wired,arg3Wired,arg4Wired,arg5Wired,arg6Wired,arg7Wired,arg8Wired);
-arg1Wired_dtor(arg1Wired);
-var ret = fromRetWire(rv);
-return ret;
-}
-
-},'ftfntnn': function anonymous(humanName,throwBindingError,invoker,fn,runDestructors,fromRetWire,toClassParamWire,toArg0Wire,toArg1Wire,toArg2Wire,toArg3Wire,arg1Wired_dtor,checkArgCount,minArgs,maxArgs
-) {
-if (arguments.length !== 15){ throw new Error(humanName + "Expected 15 closure arguments " + arguments.length + " given."); }
-return function (arg0,arg1,arg2,arg3) {
-checkArgCount(arguments.length, minArgs, maxArgs, humanName, throwBindingError);
-var arg0Wired = toArg0Wire(null, arg0);
-var arg1Wired = toArg1Wire(null, arg1);
-var arg2Wired = toArg2Wire(null, arg2);
-var arg3Wired = toArg3Wire(null, arg3);
-var rv = invoker(fn,arg0Wired,arg1Wired,arg2Wired,arg3Wired);
 arg1Wired_dtor(arg1Wired);
 var ret = fromRetWire(rv);
 return ret;
@@ -2327,7 +2327,7 @@ return ret;
   var printChar = (stream, curr) => {
       var buffer = printCharBuffers[stream];
       assert(buffer);
-      if (curr === 0 || curr === 10) {
+      if (!curr || curr === 10) {
         (stream === 1 ? out : err)(UTF8ArrayToString(buffer));
         buffer.length = 0;
       } else {

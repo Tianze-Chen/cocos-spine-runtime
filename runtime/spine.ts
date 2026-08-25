@@ -176,14 +176,36 @@ export class Spine extends UIMesh {
      * @zh 应用到骨骼位置和图像大小的缩放。
      */
     public loadFromJson (json: string, atlas: string, textures: Texture2D[], textureNames?: string[], scale = 1): boolean {
+        const texNames = this._prepareLoad(textures, textureNames);
+        return this._loadFromRuntimeData(RuntimeData.fromJson(json, atlas, texNames, scale), textures);
+    }
+
+    /**
+     * Load a skeleton from binary (.skel) + atlas + an array of engine textures.
+     * @param bytes @en Raw .skel skeleton bytes.
+     * @zh 二进制（.skel）骨骼原始字节。
+     * @param textureNames @en Atlas image names, index-aligned with textures. When
+     * omitted, texture.name is used as a best-effort match.
+     * @zh 图集图片名，与 textures 按下标对齐。缺省时用 texture.name 尽力匹配。
+     * @param scale @en Scale applied to bone positions / image sizes.
+     * @zh 应用到骨骼位置和图像大小的缩放。
+     */
+    public loadFromBinary (bytes: Uint8Array, atlas: string, textures: Texture2D[], textureNames?: string[], scale = 1): boolean {
+        const texNames = this._prepareLoad(textures, textureNames);
+        return this._loadFromRuntimeData(RuntimeData.fromBinary(bytes, atlas, texNames, scale), textures);
+    }
+
+    private _prepareLoad (textures: Texture2D[], textureNames?: string[]): string[] {
         this.destroyData();
         this._ensureNativeHeap();
-        const texNames = (textureNames && textureNames.length === textures.length)
+        return (textureNames && textureNames.length === textures.length)
             ? textureNames
             : textures.map((t) => t.name);
-        const data = new RuntimeData(json, atlas, texNames, scale);
+    }
+
+    private _loadFromRuntimeData (data: RuntimeData, textures: Texture2D[]): boolean {
         if (!data.valid) {
-            console.error(`[sp.spine] loadFromJson failed: ${spine().lastError()}`);
+            console.error(`[sp.spine] load failed: ${spine().lastError()}`);
             return false;
         }
         this._data = data;
@@ -249,7 +271,10 @@ export class Spine extends UIMesh {
     }
 
     private _loadSkeleton (data: SpineData): void {
-        if (this.loadFromJson(data.skeletonJsonStr, data.atlasText, data.textures, data.textureNames, data.scale)) {
+        const loaded = data.skeletonBinary
+            ? this.loadFromBinary(data.skeletonBinary, data.atlasText, data.textures, data.textureNames, data.scale)
+            : this.loadFromJson(data.skeletonJsonStr, data.atlasText, data.textures, data.textureNames, data.scale);
+        if (loaded) {
             this._applyDefaults();
             this._updateInspectorEnums();
         }

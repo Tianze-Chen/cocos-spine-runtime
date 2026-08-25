@@ -151,7 +151,7 @@ export class UIMesh extends UIRenderer {
 ### 3.4 资产管线：asset-handler（3.8.3+ 官方机制）
 
 - `package.json` `contributions["asset-db"]["asset-handler"]` 注册 `spine-skeleton` handler。
-- `.json` 导入时：读取 JSON → 同目录找 `.atlas` → 解析贴图页 → 输出 `sp.spineData` 序列化负载 + 建立依赖（`depend()` / `setData('depends')`）。二进制 `.skel` 暂不支持（importer 会直接拒绝）。
+- `.json` 导入时：读取 JSON → 同目录找 `.atlas` → 解析贴图页 → 输出 `sp.spineData` 序列化负载 + 建立依赖（`depend()` / `setData('depends')`）。`.skel` 导入时：原始字节经 `copyToLibrary('.bin', ...)` 存为 native sidecar 文件，序列化负载的 `_native` 指向它，引擎加载时经 `SpineData._nativeAsset` 回填。
 - 用户在编辑器里选中 `.json` 即得 `sp.spineData` 资产，拖到组件的 `spineData` 属性即可（`setSkeletonData` 仅为旧版别名）。
 
 ### 3.5 Native 接入：native-extension（无需改引擎）
@@ -255,7 +255,7 @@ embind + swig 语义完全不同的两套业务对象绑定 → 统一为「一�
 
 ### 4.5 版本升级：spine-cpp 4.3
 - 支持 spine 4.3 新格式与特性，跟上官方能力。
-- C++ 解析器 JSON 与二进制走同一条 4.3 解析管线（旧版 JSON/二进制分家）；当前绑定（`createDataJson`）与导入器仅接通 JSON，二进制 `.skel` 待接线。
+- C++ 解析器 JSON 与二进制走同一条 4.3 解析管线（旧版 JSON/二进制分家）；绑定层对称提供 `createDataJson`/`createDataBinary`（wasm 端用 `vecFromJSArray` 拷贝、JSB 端用 `getTypedArrayData` 零拷贝），导入器和运行时都已接通两种格式。
 - 88 个 4.3 源文件统一编译，源码补丁面小。
 
 ### 4.6 渲染收敛到引擎 2D 合批

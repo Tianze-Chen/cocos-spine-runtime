@@ -1,8 +1,8 @@
 'use strict';
 
 /**
- * spine-skeleton asset handler — imports a spine .json (+ .atlas + .png) into an
- * `sp.spineData` asset.
+ * spine-skeleton asset handler — imports a spine .json or binary .skel
+ * (+ .atlas + .png) into an `sp.spineData` asset.
  *
  * Registered via `contributions["asset-db"]["asset-handler"]` (the modern,
  * supported mechanism since 3.8.3; the old `importer` contribution is
@@ -124,14 +124,17 @@ function parserAtlas(asset, atlasPath) {
 
 /**
  * The serialized `sp.spineData` payload. Field names match the runtime class:
- * _atlasText / _skeletonJsonStr / textures / textureNames / scale.
+ * _atlasText / _skeletonJsonStr / _native / textures / textureNames / scale.
+ * Exactly one of jsonText / native is set: JSON sources leave native empty;
+ * binary (.skel) sources leave jsonText empty and point native at the '.bin'
+ * sidecar file saved alongside this payload (see SpineData._nativeAsset).
  */
-function buildPayload(asset, jsonText, atlasText, textureUUIDs, textureNames, scale) {
+function buildPayload(asset, jsonText, native, atlasText, textureUUIDs, textureNames, scale) {
     return {
         __type__: 'sp.spineData',
         _name: asset.basename || '',
         _objFlags: 0,
-        _native: '',
+        _native: native,
         _atlasText: atlasText,
         _skeletonJsonStr: jsonText,
         textures: textureUUIDs.map((uuid) => ({ __uuid__: uuid })),
@@ -207,21 +210,6 @@ module.exports = {
          */
         async import(asset) {
             const fspath = asset.source;
-
-            // Binary .skel is not supported by the facade JSON loader yet.
-            if (fspath.endsWith('.skel')) {
-                throw new Error('[spine-runtime] binary .skel is not supported yet; use .json');
-            }
-
-            const jsonText = await fs.promises.readFile(fspath, { encoding: 'utf8' });
-            let json;
-            try {
-                json = JSON.parse(jsonText);
-            } catch (e) {
-                console.error(e);
-                return false;
-            }
-
             const scale = (asset.userData && asset.userData.scale) || 1;
 
             // Find + parse the matching atlas.
@@ -231,8 +219,25 @@ module.exports = {
             }
             const atlas = parserAtlas(asset, atlasPath);
 
+            let payload;
+            if (fspath.endsWith('.skel')) {
+                // Raw skeleton bytes go straight into the library as a native
+                // sidecar file; the engine's asset loader fetches it at load time
+                // and calls SpineData's _nativeAsset setter (runtime/spine-data.ts).
+                await asset.copyToLibrary('.bin', fspath);
+                payload = buildPayload(asset, '', '.bin', atlas.atlasText, atlas.texturesUUID, atlas.textureNames, scale);
+            } else {
+                const jsonText = await fs.promises.readFile(fspath, { encoding: 'utf8' });
+                try {
+                    JSON.parse(jsonText);
+                } catch (e) {
+                    console.error(e);
+                    return false;
+                }
+                payload = buildPayload(asset, jsonText, '', atlas.atlasText, atlas.texturesUUID, atlas.textureNames, scale);
+            }
+
             // Build the serialized sp.spineData payload and save it to the library.
-            const payload = buildPayload(asset, jsonText, atlas.atlasText, atlas.texturesUUID, atlas.textureNames, scale);
             await asset.saveToLibrary('.json', JSON.stringify(payload));
 
             // Record dependencies so dependent assets refresh on change.

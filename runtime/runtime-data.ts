@@ -21,8 +21,8 @@ export class RuntimeData {
     private _y = 0;
     private _disposed = false;
 
-    constructor (json: string, atlas: string, textures: string[], scale: number) {
-        const handle = spine().createDataJson(json, atlas, textures, scale);
+    private constructor (createHandle: () => number, scale: number) {
+        const handle = createHandle();
         if (!handle) return;
         this._handle = handle;
         // spine-cpp applies SkeletonJson.scale to bones and attachments but
@@ -32,6 +32,22 @@ export class RuntimeData {
         this._height = spine().dataHeight(handle) * scale;
         this._x = spine().dataX(handle) * scale;
         this._y = spine().dataY(handle) * scale;
+    }
+
+    /**
+     * @en Builds runtime data from a parsed skeleton JSON string.
+     * @zh 从骨骼 JSON 字符串构建运行时数据。
+     */
+    static fromJson (json: string, atlas: string, textures: string[], scale: number): RuntimeData {
+        return new RuntimeData(() => spine().createDataJson(json, atlas, textures, scale), scale);
+    }
+
+    /**
+     * @en Builds runtime data from a binary (.skel) skeleton buffer.
+     * @zh 从二进制（.skel）骨骼数据构建运行时数据。
+     */
+    static fromBinary (bytes: Uint8Array, atlas: string, textures: string[], scale: number): RuntimeData {
+        return new RuntimeData(() => spine().createDataBinary(bytes, atlas, textures, scale), scale);
     }
 
     get handle (): number { return this._handle; }

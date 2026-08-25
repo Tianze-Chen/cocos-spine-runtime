@@ -63,7 +63,7 @@ spine-runtime/
         "asset-db": {
             "script": "./editor/importer/asset-db-script",               // asset-db worker 脚本
             "mount":  { "path": "./runtime", "readonly": true },          // 把 runtime/ 只读挂载为项目脚本
-            "asset-handler": [{ "name": "spine-skeleton", "extnames": [".json"], "handler": "registerSpineSkeletonHandler" }]
+            "asset-handler": [{ "name": "spine-skeleton", "extnames": [".json", ".skel"], "handler": "registerSpineSkeletonHandler" }]
         },
         "native": { "plugins": { "spine-runtime": { "cc_plugin.json": "./native/cc_plugin.json" } } },
         "builder": "./editor/build/builder.js"

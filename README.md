@@ -76,11 +76,12 @@ spine-cpp 4.3  +  SpineRuntime 封装(C++)
 
 ## 资源导入
 
-把 **spine 4.3 导出的 `.json`** 放进项目资源目录,同名 `.atlas`(或 `.txt` / `.atlas.txt`)和贴图 `.png` 应放在旁边。
+把 **spine 4.3 导出的 `.json` 或二进制 `.skel`** 放进项目资源目录,同名 `.atlas`(或 `.txt` / `.atlas.txt`)和贴图 `.png` 应放在旁边。
 
 - 导入器自动查找同名 atlas、解析纹理页、建立 `Texture2D` 依赖,生成 `sp.spineData` 资源
-- 支持 **JSON 格式**(`skeleton + slots + skins + animations + bones`)
-- **不支持二进制 `.skel`**(导入会直接报错)
+- 支持 **JSON 格式**(`skeleton + slots + skins + animations + bones`)和**二进制 `.skel` 格式**
+  (`.skel` 原始字节存为资源的 native sidecar 文件,运行时经 `createDataBinary` 走 spine-cpp 的
+  `SkeletonBinary` 解析;wasm 端零拷贝拷进 `std::vector`,JSB 端直接读 `Uint8Array` 裸指针)
 - 在资源 meta 的 Inspector 里可配置 **Scale**(缩放骨骼位置与图像大小)
 
 ---
@@ -200,7 +201,7 @@ const ok = spine.loadFromJson(jsonText, atlasText, [tex2d], ['tex.png'], 1);
 
 **其他限制**:
 
-- 仅支持 JSON 骨骼资源;二进制 `.skel` 不支持。
+- 支持 JSON 与二进制 `.skel` 两种骨骼资源格式。
 - 动画缓存已移除,只有 `REALTIME`;`isAnimationCached()` 恒 false。
 - `getTextureAtlas()` / `getDebugShapes()` 恒返回 `null`(不支持)。
 - 每个包装器属性读取都是一次 JS→native 往返,无缓存字段(热路径上注意开销)。

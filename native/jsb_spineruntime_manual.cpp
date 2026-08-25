@@ -200,6 +200,37 @@ static bool js_spineruntime_createDataJson(se::State& s) {
 }
 SE_BIND_FUNC(js_spineruntime_createDataJson)
 
+// Binary (.skel) counterpart of js_spineruntime_createDataJson. args[0] is a JS
+// Uint8Array; getTypedArrayData() reads its backing pointer directly (no copy),
+// same API js_spineruntime_setRenderBuffer already relies on.
+static bool js_spineruntime_createDataBinary(se::State& s) {
+    const auto& args = s.args();
+    if (args.size() < 4 || !args[0].isObject()) return false;
+    se::Object* buf = args[0].toObject();
+    uint8_t* ptr = nullptr;
+    size_t len = 0;
+    if (!buf->isTypedArray() || !buf->getTypedArrayData(&ptr, &len) || !ptr) return false;
+    std::string atlas = args[1].toStringForce();
+    std::vector<std::string> names;
+    se::Object* arr = args[2].toObject();
+    if (arr && arr->isArray()) {
+        uint32_t arrLen = 0;
+        arr->getArrayLength(&arrLen);
+        for (uint32_t i = 0; i < arrLen; ++i) {
+            se::Value v;
+            if (arr->getArrayElement(i, &v)) names.emplace_back(v.toStringForce());
+        }
+    }
+    float scale = args[3].toFloat();
+    std::vector<const char*> ptrs;
+    for (const auto& n : names) ptrs.push_back(n.c_str());
+    Data* d = Data::create(ptr, len, true, atlas.c_str(),
+                           ptrs.data(), static_cast<int>(names.size()), scale);
+    s.rval().setUint64(reinterpret_cast<uint64_t>(d));
+    return true;
+}
+SE_BIND_FUNC(js_spineruntime_createDataBinary)
+
 #define SF_DATA_FN_RET_VOID(name, expr) \
     static bool js_spineruntime_##name(se::State& s) { \
         Data* d = reinterpret_cast<Data*>(argHandle(s.args()[0])); \
@@ -1050,6 +1081,7 @@ bool register_all_spineruntime_manual(se::Object* obj) {
     se::Object* ns = nsVal.toObject();
 
     ns->defineFunction("createDataJson", _SE(js_spineruntime_createDataJson));
+    ns->defineFunction("createDataBinary", _SE(js_spineruntime_createDataBinary));
     ns->defineFunction("disposeData", _SE(js_spineruntime_disposeData));
     ns->defineFunction("dataWidth", _SE(js_spineruntime_dataWidth));
     ns->defineFunction("dataHeight", _SE(js_spineruntime_dataHeight));

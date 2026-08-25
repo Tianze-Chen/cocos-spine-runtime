@@ -69,17 +69,40 @@ static std::string getLastError() {
 // ---------------------------------------------------------------------------
 // Data
 // ---------------------------------------------------------------------------
-static Handle createDataJson(const std::string& json, const std::string& atlas,
-                             const val& texNames, float scale) {
+static std::vector<std::string> texNamesFromVal(const val& texNames, int* outCount) {
     std::vector<std::string> names;
-    std::vector<const char*> namePtrs;
     const int n = texNames["length"].as<int>();
     names.reserve(static_cast<size_t>(n));
     for (int i = 0; i < n; ++i) {
         names.emplace_back(texNames[i].as<std::string>());
     }
+    *outCount = n;
+    return names;
+}
+
+static Handle createDataJson(const std::string& json, const std::string& atlas,
+                             const val& texNames, float scale) {
+    int n = 0;
+    std::vector<std::string> names = texNamesFromVal(texNames, &n);
+    std::vector<const char*> namePtrs;
     for (const auto& s : names) namePtrs.push_back(s.c_str());
     Data* d = Data::create(json.c_str(), json.size(), false,
+                           atlas.c_str(), namePtrs.data(), n, scale);
+    return reinterpret_cast<Handle>(d);
+}
+
+// Binary (.skel) counterpart of createDataJson. `bytes` is a JS Uint8Array;
+// vecFromJSArray copies it into a std::vector so the pointer stays valid for
+// the duration of the Data::create() call (a one-time cost paid at import/load
+// time, not per frame).
+static Handle createDataBinary(const val& bytes, const std::string& atlas,
+                               const val& texNames, float scale) {
+    std::vector<uint8_t> buf = vecFromJSArray<uint8_t>(bytes);
+    int n = 0;
+    std::vector<std::string> names = texNamesFromVal(texNames, &n);
+    std::vector<const char*> namePtrs;
+    for (const auto& s : names) namePtrs.push_back(s.c_str());
+    Data* d = Data::create(buf.data(), buf.size(), true,
                            atlas.c_str(), namePtrs.data(), n, scale);
     return reinterpret_cast<Handle>(d);
 }
@@ -474,6 +497,7 @@ static val runtimeGetCurrentAttachment(Handle h, const std::string& slotName) {
 // ---------------------------------------------------------------------------
 EMSCRIPTEN_BINDINGS(spine_runtime) {
     function("createDataJson", &createDataJson);
+    function("createDataBinary", &createDataBinary);
     function("lastError", &getLastError);
     function("disposeData", &disposeData);
     function("dataWidth", &dataWidth);

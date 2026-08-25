@@ -131,6 +131,8 @@ export interface SpineRuntimeBinding {
     HEAPF32: Float32Array;
     // Data
     createDataJson(json: string, atlas: string, texNames: string[], scale: number): number;
+    // Binary (.skel) counterpart of createDataJson.
+    createDataBinary(bytes: Uint8Array, atlas: string, texNames: string[], scale: number): number;
     lastError(): string;
     disposeData(handle: number): void;
     dataWidth(handle: number): number;

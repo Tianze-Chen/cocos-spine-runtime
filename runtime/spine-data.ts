@@ -104,6 +104,32 @@ export class SpineData extends Asset {
     }
 
     /**
+     * @en Raw binary (.skel) skeleton bytes, loaded via the standard Cocos
+     * native-asset sidecar mechanism (Asset._native / _nativeAsset). Mutually
+     * exclusive with skeletonJson — set by the importer for .skel sources.
+     * @zh 二进制（.skel）骨骼原始字节，通过 Cocos 标准的 native 资源附属文件机制
+     * （Asset._native / _nativeAsset）加载。和 skeletonJson 二选一，由导入器针对
+     * .skel 来源设置。
+     */
+    protected _skeletonBinary: Uint8Array | null = null;
+
+    get skeletonBinary (): Uint8Array | null {
+        return this._skeletonBinary;
+    }
+
+    /**
+     * @internal Engine asset-loading hook: populated from the `_native`
+     * sidecar file (see Asset._nativeAsset in cocos-engine).
+     */
+    get _nativeAsset (): ArrayBuffer | null {
+        return this._skeletonBinary ? this._skeletonBinary.buffer : null;
+    }
+    set _nativeAsset (bin: ArrayBuffer | null) {
+        this._skeletonBinary = bin ? new Uint8Array(bin) : null;
+        this.reset();
+    }
+
+    /**
      * @en Texture array, index-aligned with textureNames.
      * @zh 纹理数组，与 textureNames 按下标对齐。
      */
@@ -147,7 +173,9 @@ export class SpineData extends Asset {
         const names = this.textureNames.length > 0
             ? this.textureNames
             : this.textures.map((t) => t.name);
-        this._data = new RuntimeData(this.skeletonJsonStr, this._atlasText, names, this.scale);
+        this._data = this._skeletonBinary
+            ? RuntimeData.fromBinary(this._skeletonBinary, this._atlasText, names, this.scale)
+            : RuntimeData.fromJson(this.skeletonJsonStr, this._atlasText, names, this.scale);
         if (!this._data.valid) {
             this._data = null;
             if (!quiet) error(`${this.name} failed to parse skeleton data!`);
@@ -233,7 +261,7 @@ export class SpineData extends Asset {
      * @zh 判断资源是否为空。
      */
     public isEmpty (): boolean {
-        return this._skeletonJsonStr.length === 0 && this._atlasText.length === 0;
+        return this._skeletonJsonStr.length === 0 && !this._skeletonBinary && this._atlasText.length === 0;
     }
 
     /**

@@ -42,7 +42,8 @@
                 {
                     "name": "spine-skeleton",
                     "extnames": [
-                        ".json"
+                        ".json",
+                        ".skel"
                     ],
                     "handler": "registerSpineSkeletonHandler"
                 }
