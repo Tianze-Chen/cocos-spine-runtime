@@ -144,7 +144,9 @@ export class UIMesh extends UIRenderer {
 - 组件（数据提供方）只填 `setMeshData`；缓冲分配、合批、提交全部由引擎内部完成。
 - **通用性**：它是「2D 网格数据消费者」，不感知 spine —— dragonbones、自定义骨骼、程序化网格都能复用。
 - **对现有引擎零影响**：纯新增类，不修改任何现有渲染路径。
-- Spine 每帧先调用 `runtimeSetOutputTransform`，让 C++ 把节点世界变换与 y 翻转烘焙进顶点；组件必须调用 `super.onLoad()` 初始化 UIMesh 渲染实体，并强制 `setUseLocal(false)`，避免矩阵重复应用。
+- **顶点空间契约（无开关）**：UIMesh 的消费者一律提供节点局部空间顶点，引擎据此在内部派生全部旧变换开关（`USE_LOCAL` 宏 / `DrawBatch.useLocalData` / `RenderEntity.setUseLocal` = `!enableBatch`）—— 不合批走 GPU 每 draw 变换（USE_LOCAL 宏 + 2D batcher 既有的 cc-local UBO 上传），合批则由 UIMesh 在拷贝进共享 chunk 时 JS 烘世界（合并批次没有 per-draw 矩阵）。没有「已烘世界空间」这种输入模式，消费者永不接触这三个开关。
+- **级联不透明度由 UIMesh 无条件承担**：VERTEX 类型数据引擎不折算 opacity，UIMesh 在拷贝顶点时把级联值（自身 color.a × 各祖先 UIOpacity 的 localOpacity）乘进顶点色 —— straight 数据只乘 alpha 字节，PMA 数据（`premultipliedAlpha` 开关声明）乘 light RGBA + dark RGB，混合结果对 opacity 线性。内置材质也归属 UIMesh（default-spine-material，按开关/stride 重编译宏 + 混合因子）。
+- Spine 侧据此删光了 transform 逻辑：顶点是节点局部空间（C++ 默认输出仿射只做 y-flip，`runtimeSetOutputTransform` 保留为一次性 seam 不再逐帧调用），`onLoad` 无需任何接线。
 
 外置 wasm 通过自定义引擎公开的 `cc.wasm.instantiateWasm` 加载。它只是把引擎已有的 `pal/wasm` 平台适配器导出给插件使用:Web 获取二进制,小游戏把 `cocos-js/<name>.wasm` 文件路径交给平台 API。这样编辑器预览、Web 和微信小游戏共用同一 loader,无需内嵌 base64 或维护微信专用 glue。
 

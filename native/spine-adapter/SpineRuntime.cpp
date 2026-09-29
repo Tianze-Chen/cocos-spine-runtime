@@ -356,7 +356,11 @@ struct Runtime::Impl {
     RenderData renderData;
 
     // Output-space affine applied to every vertex at the end of collectRenderData.
-    float outA = 1.0F, outB = 0.0F, outC = 0.0F, outD = 1.0F, outTx = 0.0F, outTy = 0.0F;
+    // Default is the constant spine y-down -> Cocos y-up flip (a=1, d=-1): vertices
+    // stay in the node's local space and the consumer (engine UIMesh)
+    // applies the node transform at render time. runtimeSetOutputTransform remains as a
+    // one-shot seam but is no longer called per frame.
+    float outA = 1.0F, outB = 0.0F, outC = 0.0F, outD = -1.0F, outTx = 0.0F, outTy = 0.0F;
 
     float timeScale = 1.0F;
     bool paused = false;
@@ -1390,8 +1394,10 @@ void Runtime::collectRenderData(Runtime::Impl& impl) {
     // Required for clipping attachments whose end slot is null (end of draw order).
     impl.clipper->clipEnd();
 
-    // Bake the output-space affine (node/world transform + y-flip) into the
-    // vertex positions so no per-node transform uniform is needed for batching.
+    // Bake the output-space affine into the vertex positions. The default is the
+    // constant y-flip (local-space output for the UIMesh consumer); the node
+    // transform itself is applied by the engine (GPU per-draw or JS bake on
+    // batching), not here.
     if (impl.outA != 1.0F || impl.outB != 0.0F || impl.outC != 0.0F ||
         impl.outD != 1.0F || impl.outTx != 0.0F || impl.outTy != 0.0F) {
         float* p = impl.vertexBuffer.data();

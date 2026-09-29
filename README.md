@@ -42,10 +42,9 @@ spine-cpp 4.3  +  SpineRuntime 封装(C++)
 **不透明句柄 + 自由函数**。`Data`/`Runtime` 以指针值(句柄)暴露给 JS,所有操作通过顶层自由函数进行,例如 `createDataJson(json, atlas, texNames, scale)`、`runtimeSetAnimation(handle, track, name, loop)`、`runtimeRenderData(handle)`。句柄用后须显式 `disposeData` / `disposeRuntime` 释放。
 
 **渲染路径**(每帧):
-1. `runtimeSetOutputTransform(...)` — 把节点世界变换与 y 翻转交给 C++ 烘焙进顶点
-2. `runtimeUpdate(handle, dt)` — 推进动画/姿态/几何
-3. `runtimeRenderData(handle)` — 返回 `{vertexCount, indexCount, vertexStrideBytes, vPtr, iPtr, segments[], segmentCount, indexOverflow}`;`vPtr`/`iPtr` 是内存缓冲区的字节偏移
-4. TS 用 `heap.slice(vPtr, vPtr + len)` 取得自有顶点/索引副本,按 segment 分组后交给 `UIMesh.setMeshData(...)`
+1. `runtimeUpdate(handle, dt)` — 推进动画/姿态/几何；输出仿射保持 create 默认(恒定 y 翻转,顶点是节点局部空间;`runtimeSetOutputTransform` 保留为一次性 seam,不再逐帧调用)
+2. `runtimeRenderData(handle)` — 返回 `{vertexCount, indexCount, vertexStrideBytes, vPtr, iPtr, segments[], segmentCount, indexOverflow}`;`vPtr`/`iPtr` 是内存缓冲区的字节偏移
+3. TS 用 `heap.slice(vPtr, vPtr + len)` 取得自有顶点/索引副本,按 segment 分组后交给 `UIMesh.setMeshData(...)`;节点变换与级联不透明度由引擎 `cc.UIMesh` 接管(顶点一律按节点局部空间输入,引擎侧无开关:不合批走 GPU 每 draw 变换,合批由 UIMesh 烘世界),插件零 transform/opacity 逻辑
 
 **两种后端的"堆"来源不同**:
 - **wasm**: 直接读 `Module.HEAPU8`,`vPtr`/`iPtr` 是 wasm 线性内存地址
@@ -218,11 +217,13 @@ const ok = spine.loadFromJson(jsonText, atlasText, [tex2d], ['tex.png'], 1);
 
 ```bash
 source <你的 emsdk 安装路径>/emsdk_env.sh   # 先安装 Emscripten SDK
-emcmake cmake -S native/wasm -B native/wasm/build
+emcmake cmake -S native/wasm -B native/wasm/build -DCMAKE_BUILD_TYPE=Release
 cmake --build native/wasm/build
 cp native/wasm/build/spine-runtime.js native/wasm/build/spine-runtime.wasm native/wasm/prebuilt/
 node native/wasm/scripts/gen-glue.js
 ```
+
+`-DCMAKE_BUILD_TYPE=Release`(-O3)不可省略:CMakeLists 不设默认优化级别,空 build type 会产出未优化的 wasm(体积 +130%、解算显著变慢)。已有 build 目录会记住该设置,增量重建无需重复传参。
 
 构建产出 `spine-runtime.wasm` 与 ESM glue。先同步到 `native/wasm/prebuilt/`,再由 `gen-glue.js`（兼容入口,实际委托 `gen-glue-file.js`）把 ESM glue 转成 `runtime/bindings/spine-runtime.js` 的 CJS 形式。wasm 始终是独立文件,不会再 gzip/base64 内嵌。`EMBIND_AOT=1` + `DYNAMIC_EXECUTION=0` 会提前生成 Embind 调用器,避免小游戏沙箱中的 `eval/new Function`;`-mno-reference-types -mno-bulk-memory` 保持微信 WASM 校验器兼容。
 

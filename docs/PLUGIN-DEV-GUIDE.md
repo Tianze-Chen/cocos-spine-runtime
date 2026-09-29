@@ -405,14 +405,14 @@ private _updateMeshData(): void {
 
 - **`UIMeshSegment`** = `{ indexOffset, indexCount, texture, material }`。一个 segment 对应一次「换贴图/换材质」,也就是一次 draw call。多图集 Spine 就是在这里自然分段(多一个贴图 = 多一个 segment)。
 - **`vertexData` / `indexData`** 是引擎预期的顶点格式(`V3F_T2F_C4B` 24 字节,或带 dark color 的 28 字节)。**格式必须和引擎 2D 顶点格式一致**,否则渲染错乱。
-- **变换烘焙**:本插件把「y 翻转 + 世界变换」提前在 C++ 里做进顶点(`runtimeSetOutputTransform`),所以这里**不用**再逐顶点乘变换矩阵 —— 合批时也不需要 per-node 变换 uniform。这是能合批的关键。
+- **变换接管**:本插件把恒定「y 翻转」留在 C++ 默认输出仿射里(顶点是节点局部空间),节点变换与级联不透明度由引擎 `cc.UIMesh` 接管 —— 插件侧无需任何接线:UIMesh 的契约就是节点局部空间顶点。不合批走 GPU 每 draw 变换(USE_LOCAL 宏 + batcher 既有的 cc-local UBO),合批则由 UIMesh 在拷贝进共享 chunk 时 JS 烘世界(合并批次没有 per-draw 矩阵)。`USE_LOCAL` / `useLocalData` / `setUseLocal` 三层旧开关全部由 UIMesh 内部派生,插件不接触。
 - **`markForUpdateRenderData()`** → 数据脏了主动调用,让引擎重新上传 buffer。
 
 ### 6.3 四个容易忽略的细节
 
 ```ts
-// 1) 让渲染实体用「世界空间」而非本地空间(因为我们烘焙了世界变换)
-this._renderEntity.setUseLocal(false);
+// 1) 顶点空间:一律节点局部空间 —— 引擎无开关、插件无需接线;transform 路径由
+//    UIMesh 按是否合批自己派生(不合批 GPU 每 draw,合批 JS 烘世界)
 
 // 2) JSB 端所有组件共用一个 staging buffer,提交前要自己 slice 一份,
 //    否则下一个组件写 buffer 会覆盖你还没提交的数据

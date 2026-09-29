@@ -1,6 +1,7 @@
 # SpineRuntime WASM 构建
 # 编译 spine-cpp 4.3 + SpineRuntime.cpp 为 spine-runtime.wasm（web 端运行时地基）。
-# 用法：source /d/emsdk/emsdk_env.sh && emcmake cmake -S native/wasm -B native/wasm/build && cmake --build native/wasm/build
+# 用法：source /d/emsdk/emsdk_env.sh && emcmake cmake -S native/wasm -B native/wasm/build -DCMAKE_BUILD_TYPE=Release && cmake --build native/wasm/build
+# （本文件不设默认优化级别 —— 空 build type 会产出未优化的 wasm，勿省略 Release。）
 cmake_minimum_required(VERSION 3.16)
 project(spine_runtime_wasm CXX)
 

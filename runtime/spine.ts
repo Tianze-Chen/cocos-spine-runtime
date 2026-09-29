@@ -3,8 +3,10 @@
  sp.spine — SpineRuntime driven spine component (spine-cpp 4.3).
  Renders through the engine's cc.UIMesh consumer: this component computes the
  spine mesh data (vertices / indices / segments) via the SpineRuntime binding
- and feeds it to UIMesh.setMeshData every frame. The engine owns buffer
- allocation, batching and submission, so this plugin needs no engine internals.
+ and feeds it to UIMesh.setMeshData every frame. Vertices stay in the node's
+ local space (y-flipped to Cocos orientation by the C++ runtime's default
+ output affine); UIMesh owns the node transform
+ and cascaded opacity, so this plugin carries no transform/opacity logic.
 */
 
 import {
@@ -23,7 +25,7 @@ import {
     setPropertyEnumType,
 } from 'cc';
 import { _decorator } from 'cc';
-const { ccclass, executeInEditMode, editable, help, menu, override, property } = _decorator;
+const { ccclass, executeInEditMode, help, menu, property } = _decorator;
 import type { UIMeshSegment } from 'cc';
 import { spine, loadSpineRuntime } from './bindings';
 import { RuntimeData, RuntimeTextureMap } from './runtime-data';
@@ -102,12 +104,6 @@ export class Spine extends UIMesh {
     @property({ visible: false })
     protected _timeScale = 1;
 
-    // Standard PNG atlases use straight (unassociated) alpha. PMA must be an
-    // explicit opt-in matching the Spine export setting; otherwise transparent
-    // pixels with retained RGB leak the vertex tint when blended with src=ONE.
-    @property({ visible: false })
-    protected _premultipliedAlpha = false;
-
     @property({ visible: false })
     protected _useTint = false;
 
@@ -127,15 +123,6 @@ export class Spine extends UIMesh {
     protected _defaultSkin = '';
 
     @property({ visible: false })
-    protected _debugMesh = false;
-
-    @property({ visible: false })
-    protected _debugBones = false;
-
-    @property({ visible: false })
-    protected _debugSlots = false;
-
-    @property({ visible: false })
     protected _cacheMode = SpineAnimationCacheMode.REALTIME;
 
     @property
@@ -145,6 +132,12 @@ export class Spine extends UIMesh {
     protected _runtime = 0;
     protected _textureMap = new RuntimeTextureMap();
     protected _paused = false;
+
+    // Dirty-check gate (see update): _poseDirty covers the parameter/pose changes that
+    // the component can see (setAnimation / setSkin / tintColor...). Node movement no
+    // longer needs a rebake -- vertices are node-local, so UIMesh applies the transform
+    // at render time. Only markPoseDirty() sets it (direct runtime-object edits go too).
+    protected _poseDirty = true;
     protected _animationName = '';
     protected _skinName = '';
     protected _nextTextureId = 0;
@@ -403,23 +396,11 @@ export class Spine extends UIMesh {
         if (this._spineData && !this._data) {
             this._loadFromSpineData();
         }
-        this._forceUseLocal();
-    }
-
-    /**
-     * This component always bakes vertices to world space (the material is
-     * compiled with USE_LOCAL:false), so the render entity must never apply the
-     * local/world matrix again. The base UIMesh defaults useLocal to true
-     * (createRenderEntity) and only flips it through its enableBatch accessor,
-     * both of which deserialization bypasses — force it here. The internal
-     * members are absent from the public cc.d.ts, so reach them through a cast
-     * (same pattern as markForUpdateRenderData).
-     */
-    private _forceUseLocal (): void {
-        const self = this as any;
-        if (self._renderEntity && typeof self._renderEntity.setUseLocal === 'function') {
-            self._renderEntity.setUseLocal(false);
-        }
+        // Declares vertices as node-local (the y-flip is carried by the C++ default output
+        // affine): the node transform and cascaded opacity are owned by UIMesh (unbatched:
+        // per-draw GPU transform; batched: JS baking), so this component holds no more
+        // transform/opacity logic; the three legacy switches setUseLocal/USE_LOCAL/useLocalData are
+        // all derived inside UIMesh -- consumers never touch them.
     }
 
     public onDestroy (): void {
@@ -443,21 +424,21 @@ export class Spine extends UIMesh {
     // Per-frame drive: run the facade and feed the UIMesh consumer.
     // -----------------------------------------------------------------------
     public update (dt: number): void {
-        if (this._paused || !this._runtime) return;
-        this._setOutputTransform();
+        // UIMesh base: staleness polling of node transform/cascaded opacity on JSB (no-op on web).
+        super.update(dt);
+        if (!this._runtime) return;
+        // Dirty gate: no advance + no param change -> the C++ re-solve and heap copy are
+        // skipped (static = free). Node moves need no rebake -- vertices are node-local,
+        // UIMesh applies the transform at render time (GPU per draw; JSB poll marks dirty).
+        const advancing = !this._paused && dt * this._timeScale !== 0;
+        if (!advancing && !this._poseDirty) return;
+        this._poseDirty = false;
+        // Output affine keeps the C++ create default (incl. y-flip): vertices stay node-local;
+        // node transform owned by UIMesh. While paused, C++ updateAnimation skips advancing
+        // inside (paused setter called runtimeSetPaused); only updateWorldTransform + re-extract.
         spine().runtimeUpdate(this._runtime, dt * this._timeScale);
         this._updateMeshData();
         this.syncAttachedNode();
-    }
-
-    private _setOutputTransform (): void {
-        const w = this.node.worldMatrix;
-        // Fold the spine y-down -> Cocos y-up flip into the world transform and
-        // hand the combined 2D affine to the runtime. C++ bakes it into every
-        // vertex (x' = a*x + b*y + tx, y' = c*x + d*y + ty), so batching needs
-        // no per-node transform uniform.
-        spine().runtimeSetOutputTransform(this._runtime,
-            w.m00, -w.m04, w.m01, -w.m05, w.m12, w.m13);
     }
 
     private _updateMeshData (): void {
@@ -477,9 +458,10 @@ export class Spine extends UIMesh {
         const vertexData = heap.slice(rd.vPtr, rd.vPtr + vLen);
         const indexData = heap.slice(rd.iPtr, rd.iPtr + iLen);
 
-        // Vertices already arrive flipped + baked to world space: the runtime
-        // applies the output affine (node/world transform + y-flip) in C++
-        // (see _setOutputTransform), so no per-vertex transform happens here.
+        // Vertices arrive y-flipped into the node's local space (the C++
+        // runtime's default output affine); the node transform is applied by
+        // UIMesh at render time, so no per-vertex
+        // transform happens here.
 
         const segments: UIMeshSegment[] = [];
         let indexOffset = 0;
@@ -512,7 +494,7 @@ export class Spine extends UIMesh {
         let dst: gfx.BlendFactor;
         switch (blendMode) {
         case 1:
-            src = this._premultipliedAlpha ? gfx.BlendFactor.ONE : gfx.BlendFactor.SRC_ALPHA;
+            src = this.premultipliedAlpha ? gfx.BlendFactor.ONE : gfx.BlendFactor.SRC_ALPHA;
             dst = gfx.BlendFactor.ONE;
             break;
         case 2:
@@ -520,11 +502,11 @@ export class Spine extends UIMesh {
             dst = gfx.BlendFactor.ONE_MINUS_SRC_ALPHA;
             break;
         case 3:
-            src = this._premultipliedAlpha ? gfx.BlendFactor.ONE : gfx.BlendFactor.SRC_ALPHA;
+            src = this.premultipliedAlpha ? gfx.BlendFactor.ONE : gfx.BlendFactor.SRC_ALPHA;
             dst = gfx.BlendFactor.ONE_MINUS_SRC_COLOR;
             break;
         default:
-            src = this._premultipliedAlpha ? gfx.BlendFactor.ONE : gfx.BlendFactor.SRC_ALPHA;
+            src = this.premultipliedAlpha ? gfx.BlendFactor.ONE : gfx.BlendFactor.SRC_ALPHA;
             dst = gfx.BlendFactor.ONE_MINUS_SRC_ALPHA;
             break;
         }
@@ -560,6 +542,7 @@ export class Spine extends UIMesh {
             return null;
         }
         this._animationName = name;
+        this.markPoseDirty();
         return this._makeTrackEntry(handle);
     }
 
@@ -570,6 +553,7 @@ export class Spine extends UIMesh {
     public addAnimation (trackIndex: number, name: string, loop: boolean, delay = 0): TrackEntry | null {
         if (!this._runtime) return null;
         const handle = spine().runtimeAddAnimation(this._runtime, trackIndex, name, loop, delay);
+        if (handle) this.markPoseDirty();
         return this._makeTrackEntry(handle);
     }
 
@@ -613,7 +597,10 @@ export class Spine extends UIMesh {
      * @zh 清除指定轨道的动画。
      */
     public clearTrack (trackIndex: number): void {
-        if (this._runtime) spine().runtimeClearTrack(this._runtime, trackIndex);
+        if (this._runtime) {
+            spine().runtimeClearTrack(this._runtime, trackIndex);
+            this.markPoseDirty();
+        }
     }
 
     /**
@@ -621,7 +608,10 @@ export class Spine extends UIMesh {
      * @zh 清除所有轨道。
      */
     public clearTracks (): void {
-        if (this._runtime) spine().runtimeClearTracks(this._runtime);
+        if (this._runtime) {
+            spine().runtimeClearTracks(this._runtime);
+            this.markPoseDirty();
+        }
     }
 
     /**
@@ -640,7 +630,10 @@ export class Spine extends UIMesh {
      */
     public setSkin (name: string): void {
         if (!this._runtime || !name) return;
-        if (spine().runtimeSetSkin(this._runtime, name)) this._skinName = name;
+        if (spine().runtimeSetSkin(this._runtime, name)) {
+            this._skinName = name;
+            this.markPoseDirty();
+        }
     }
 
     /**
@@ -648,20 +641,32 @@ export class Spine extends UIMesh {
      * @zh 设置两个动画之间的过渡时长。
      */
     public setMix (fromAnimation: string, toAnimation: string, duration: number): void {
-        if (this._runtime) spine().runtimeSetMix(this._runtime, fromAnimation, toAnimation, duration);
+        if (this._runtime) {
+            spine().runtimeSetMix(this._runtime, fromAnimation, toAnimation, duration);
+            this.markPoseDirty();
+        }
     }
 
     // -----------------------------------------------------------------------
     // Pose
     // -----------------------------------------------------------------------
     public setToSetupPose (): void {
-        if (this._runtime) spine().runtimeSetToSetupPose(this._runtime);
+        if (this._runtime) {
+            spine().runtimeSetToSetupPose(this._runtime);
+            this.markPoseDirty();
+        }
     }
     public setBonesToSetupPose (): void {
-        if (this._runtime) spine().runtimeSetBonesToSetupPose(this._runtime);
+        if (this._runtime) {
+            spine().runtimeSetBonesToSetupPose(this._runtime);
+            this.markPoseDirty();
+        }
     }
     public setSlotsToSetupPose (): void {
-        if (this._runtime) spine().runtimeSetSlotsToSetupPose(this._runtime);
+        if (this._runtime) {
+            spine().runtimeSetSlotsToSetupPose(this._runtime);
+            this.markPoseDirty();
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -694,7 +699,10 @@ export class Spine extends UIMesh {
      * @zh 为槽位设置附件。
      */
     public setAttachment (slotName: string, attachmentName: string): void {
-        if (this._runtime) spine().runtimeSetAttachment(this._runtime, slotName, attachmentName);
+        if (this._runtime) {
+            spine().runtimeSetAttachment(this._runtime, slotName, attachmentName);
+            this.markPoseDirty();
+        }
     }
 
     /**
@@ -718,6 +726,7 @@ export class Spine extends UIMesh {
         }
         const id = this._getOrAddTexture(tex2d);
         spine().runtimeSetSlotTexture(this._runtime, slotName, id);
+        this.markPoseDirty();
     }
 
     /**
@@ -725,7 +734,10 @@ export class Spine extends UIMesh {
      * @zh 限制只渲染给定范围内的槽位。
      */
     public setSlotsRange (startSlotIndex: number, endSlotIndex: number): void {
-        if (this._runtime) spine().runtimeSetSlotsRange(this._runtime, startSlotIndex, endSlotIndex);
+        if (this._runtime) {
+            spine().runtimeSetSlotsRange(this._runtime, startSlotIndex, endSlotIndex);
+            this.markPoseDirty();
+        }
     }
 
     private _getOrAddTexture (tex2d: Texture2D): number {
@@ -797,6 +809,23 @@ export class Spine extends UIMesh {
     }
 
     /**
+     * @en The single write point for the pose-dirty flag: every internal setter
+     * routes through it, so the rule "what counts as a pose change" lives in one
+     * place. It is also the escape hatch for code that mutates runtime objects
+     * directly (e.g. `sp.Slot.setColor`, `TrackEntry` setters) while paused --
+     * such writes bypass the component, so the dirty gate cannot see them. An
+     * advancing animation rebakes anyway, and node movement needs no rebake
+     * (UIMesh applies the transform at render time).
+     * @zh 强制下一帧重烘。仅在「已暂停」时直接改运行时对象（如 `sp.Slot.setColor`、
+     * `TrackEntry` 的 setter）才需要 —— 这些写入绕过组件，脏门控看不到；动画推进
+     * 本身就会重烘。节点移动无需重烘（变换由 UIMesh 渲染期应用）。
+     * 该函数是 _poseDirty 的唯一写点：内部 setter 全部经它置位，外部直接改运行时对象也调它。
+     */
+    public markPoseDirty (): void {
+        this._poseDirty = true;
+    }
+
+    /**
      * @en Destroys the render data.
      * @zh 销毁渲染数据。
      */
@@ -849,13 +878,18 @@ export class Spine extends UIMesh {
     get sockets (): SpineSocket[] { return this._sockets; }
     set sockets (val: SpineSocket[]) {
         this._sockets = val;
+        // Socket sync only runs on rebake frames (syncAttachedNode); a new socket needs a rebake.
+        this.markPoseDirty();
     }
 
-    get premultipliedAlpha (): boolean { return this._premultipliedAlpha; }
-    set premultipliedAlpha (value: boolean) {
-        this._premultipliedAlpha = value;
+    // Standard PNG atlases use straight (unassociated) alpha. PMA must be an
+    // explicit opt-in matching the Spine export setting; otherwise transparent
+    // pixels with retained RGB leak the vertex tint when blended with src=ONE.
+    // The property lives on UIMesh (single owner); this hook forwards the
+    // declared format to the C++ bake (light-color premultiplication and the
+    // dark-color sentinel) — the segment material factory reads the getter.
+    protected override onPremultipliedAlphaChanged (): void {
         this.applyParams();
-        this.markForUpdateRenderData();
     }
 
     get useTint (): boolean { return this._useTint; }
@@ -872,24 +906,6 @@ export class Spine extends UIMesh {
         this.markForUpdateRenderData();
     }
 
-    /**
-     * @en Whether to enable sprite batching. This component always bakes
-     * vertices to world space (material compiled with USE_LOCAL:false), so
-     * toggling this only changes batch merging and never flips the render
-     * entity's useLocal flag — the node/world matrix must not be applied twice.
-     * @zh 是否启用合批。本组件始终将顶点烘焙到世界空间（材质以 USE_LOCAL:false
-     * 编译），因此切换此项只改变合批合并，不会翻转渲染实体的 useLocal 标志——
-     * 节点/世界矩阵不可被重复应用。
-     */
-    @override
-    @editable
-    get enableBatch (): boolean { return (this as any)._enableBatch; }
-    set enableBatch (value: boolean) {
-        (this as any)._enableBatch = value;
-        this._forceUseLocal();
-        this.markForUpdateRenderData();
-    }
-
     get tintColor (): Color { return this._tintColor; }
     set tintColor (value: Color) {
         this._tintColor = value;
@@ -901,17 +917,21 @@ export class Spine extends UIMesh {
     }
 
     protected applyParams (): void {
+        // Param changes affect vertex baking (color packing/blending/format) -- all of them are
+        // dirty-marked here (consumed by the update gate).
+        this.markPoseDirty();
         if (!this._runtime) return;
         const c = this._tintColor;
         spine().runtimeSetParams(this._runtime, this._timeScale,
                                  c.r / 255, c.g / 255, c.b / 255, c.a / 255,
-                                 this._premultipliedAlpha, this._useTint);
+                                 this.premultipliedAlpha, this._useTint);
     }
 
     /**
      * Sync socket nodes to the current bone world transforms every frame.
-     * Mesh vertices are reflected on Y in _updateMeshData(), so the socket's
-     * translation and Y basis row must use the same render-space conversion.
+     * Bone queries return raw spine space (y-down); mesh vertices are
+     * y-flipped by the C++ runtime's default output affine, so the socket's
+     * translation and Y basis row use the same render-space conversion.
      */
     syncAttachedNode (): void {
         if (!this._runtime || this._sockets.length === 0) return;
@@ -961,7 +981,11 @@ export class Spine extends UIMesh {
      * @zh 按 blend 源/目标 + tint 构建材质实例，缓存复用。
      */
     public getSpineMaterialForBlendAndTint (src: gfx.BlendFactor, dst: gfx.BlendFactor, useTint: boolean): renderer.MaterialInstance {
-        const key = `${useTint}/${src}/${dst}`;
+        // USE_LOCAL follows the UIMesh transform mode: GPU take-over only when
+        // not batched (batched data is world-baked by UIMesh before submit).
+        // Part of the cache key — enableBatch toggles at runtime.
+        const useLocal = !this.enableBatch;
+        const key = `${useTint}/${useLocal}/${src}/${dst}`;
         let inst = this._materialCache[key];
         if (inst) return inst;
         const material = this.getMaterialTemplate();
@@ -981,9 +1005,9 @@ export class Spine extends UIMesh {
                     }],
                 },
             });
-            // Vertex positions are baked to world space in _updateMeshData().
-            // Keep this identical for batched, non-batched, web and JSB paths.
-            inst.recompileShaders({ TWO_COLORED: useTint, USE_LOCAL: false });
+            // Vertex positions stay node-local (UIMesh applies the transform);
+            // batched mode gets world-baked data and compiles without the macro.
+            inst.recompileShaders({ TWO_COLORED: useTint, USE_LOCAL: useLocal });
             return inst;
         } catch (e) {
             // The web-preview engine bundle ships the native (jsb) MaterialInstance
@@ -992,7 +1016,7 @@ export class Spine extends UIMesh {
             const fallback = this.getMaterialInstance(0);
             if (fallback) {
                 try {
-                    fallback.recompileShaders({ TWO_COLORED: useTint, USE_LOCAL: false });
+                    fallback.recompileShaders({ TWO_COLORED: useTint, USE_LOCAL: useLocal });
                 } catch (compileError) {
                     // The built-in spine effect defaults to world-space input,
                     // so an older fallback without recompile support is usable.
