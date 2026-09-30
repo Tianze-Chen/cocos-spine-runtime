@@ -12,6 +12,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const engineModules = require('./editor/engine-modules');
+const simulator = require('./editor/simulator');
 const LOG = process.env.SPINE_MAIN_LOG || path.join(os.tmpdir(), 'spine-runtime-main-drop.log');
 const WASM_SOURCE = path.join(__dirname, 'native', 'wasm', 'prebuilt', 'spine-runtime.wasm');
 // Remembers that the user declined the module repair, so the prompt is asked
@@ -140,9 +141,27 @@ exports.load = async function load () {
         log(`ensureEngineModules failed: ${e && e.message}`);
         console.warn(`[spine-runtime] engine module check failed: ${e && e.message}`);
     });
+    // Keep the editor-launched native simulator usable: plugins compiled in
+    // (background; first build can take minutes) and the engine-JS side the
+    // simulator loads actually present for a custom engine (background
+    // request to the editor's own builder) — see editor/simulator.js. Also
+    // not awaited: package loading must not block on a compiler.
+    simulator.ensureSimulatorPlugins();
+    simulator.ensureSimulatorEngineTS();
 };
 
 exports.methods = {
+    /**
+     * Menu: 扩展 → "Spine: 重建模拟器". Re-runs the simulator plugin
+     * configure+build with all accumulated scan roots and the simulator
+     * engine TS build (both forced). Awaited so the menu action reports the
+     * outcome through the console messages the modules themselves emit.
+     */
+    async rebuildSimulator () {
+        await simulator.ensureSimulatorPlugins({ force: true });
+        return simulator.ensureSimulatorEngineTS({ force: true });
+    },
+
     /**
      * `contributions.inspector.drop.node` handler.
      *

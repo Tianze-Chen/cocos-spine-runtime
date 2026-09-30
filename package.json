@@ -30,8 +30,20 @@
                 "methods": [
                     "inspectorDrop"
                 ]
+            },
+            "rebuild-simulator": {
+                "methods": [
+                    "rebuildSimulator"
+                ]
             }
         },
+        "menu": [
+            {
+                "path": "i18n:menu.extension",
+                "label": "Spine: 重建模拟器 / Rebuild simulator",
+                "message": "rebuild-simulator"
+            }
+        ],
         "asset-db": {
             "script": "./editor/importer/asset-db-script",
             "mount": {
