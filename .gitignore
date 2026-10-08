@@ -16,3 +16,6 @@ native/wasm/Makefile
 .DS_Store
 Thumbs.db
 *.log
+
+# Cocos Creator asset-db metadata (regenerated per machine; runtime/ is a read-only mount)
+*.meta
